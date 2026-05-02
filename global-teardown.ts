@@ -1,6 +1,10 @@
 import {spawn} from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const CONTAINER_NAME = 'equipment-e2e-postgres';
+const STATE_FILE = path.join(os.tmpdir(), 'equipment-e2e-state.json');
 
 function run(command: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -23,7 +27,37 @@ function run(command: string, args: string[]): Promise<string> {
     });
 }
 
+async function killProcessGroup(pid: number) {
+    try {
+        process.kill(-pid, 'SIGTERM');
+    } catch {
+        return;
+    }
+    // Give the process group a few seconds to shut down gracefully.
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    try {
+        process.kill(-pid, 'SIGKILL');
+    } catch {
+        // Already terminated.
+    }
+}
+
 export default async function globalTeardown() {
+    // Shut down the backend and frontend.
+    try {
+        const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+        if (state.backendPid) {
+            await killProcessGroup(state.backendPid);
+        }
+        if (state.frontendPid) {
+            await killProcessGroup(state.frontendPid);
+        }
+        fs.unlinkSync(STATE_FILE);
+    } catch {
+        // State file missing or invalid; processes may have already exited.
+    }
+
+    // Remove the Postgres container.
     try {
         await run('docker', ['rm', '-f', CONTAINER_NAME]);
     } catch {

@@ -1,10 +1,18 @@
 import {spawn} from 'child_process';
+import * as fs from 'fs';
+import * as http from 'http';
+import * as os from 'os';
+import * as path from 'path';
+import 'dotenv/config';
 
 const CONTAINER_NAME = 'equipment-e2e-postgres';
+const BACKEND_PORT = 8080;
+const FRONTEND_PORT = 5173;
+const STATE_FILE = path.join(os.tmpdir(), 'equipment-e2e-state.json');
 
-function run(command: string, args: string[]): Promise<string> {
+function run(command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<string> {
     return new Promise((resolve, reject) => {
-        const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe']});
+        const child = spawn(command, args, {stdio: ['ignore', 'pipe', 'pipe'], ...options});
         let stdout = '';
         let stderr = '';
         child.stdout.on('data', (data: Buffer) => {
@@ -21,6 +29,62 @@ function run(command: string, args: string[]): Promise<string> {
             }
         });
     });
+}
+
+function startProcess(command: string, args: string[], options?: {
+    cwd?: string;
+    env?: NodeJS.ProcessEnv
+}, label?: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+        const child = spawn(command, args, {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: true,
+            ...options,
+        });
+        const prefix = label ? `[${label}] ` : '';
+        child.stdout.on('data', (data: Buffer) => {
+            process.stdout.write(prefix + data.toString().replace(/\n(?=.)/g, '\n' + prefix));
+        });
+        child.stderr.on('data', (data: Buffer) => {
+            process.stderr.write(prefix + data.toString().replace(/\n(?=.)/g, '\n' + prefix));
+        });
+        child.on('error', reject);
+        child.on('spawn', () => {
+            child.unref();
+            resolve(child.pid!);
+        });
+    });
+}
+
+async function waitForHttp(url: string, pid: number, maxAttempts: number = 10, intervalMs: number = 1000): Promise<void> {
+    for (let i = 0; i < maxAttempts; i++) {
+        try {
+            // signal 0 just tests if the pid is valid. it only throws if the process is not running.
+            process.kill(pid, 0);
+        } catch {
+            throw new Error(`Process ${pid} exited before ${url} became ready`);
+        }
+        try {
+            const response = await new Promise<http.IncomingMessage>((resolve, reject) => {
+                const req = http.get(url, (res) => {
+                    res.resume();
+                    resolve(res);
+                });
+                req.on('error', reject);
+                req.setTimeout(2000, () => {
+                    req.destroy();
+                    reject(new Error('Timeout'));
+                });
+            });
+            if (response.statusCode && response.statusCode < 500) {
+                return;
+            }
+        } catch {
+            // Not ready yet
+        }
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    throw new Error(`HTTP endpoint ${url} did not become ready within ${maxAttempts} seconds`);
 }
 
 export default async function globalSetup() {
@@ -59,6 +123,35 @@ export default async function globalSetup() {
         throw new Error('Postgres container did not become ready within 30 seconds');
     }
 
-    // Expose connection details so tests (or a spawned backend) can use them.
+    // Set environment variables for backend and tests.
     process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:15432/test';
+    process.env.POSTGRES_DB = 'jdbc:postgresql://localhost:15432/test';
+    process.env.POSTGRES_USER = 'postgres';
+    process.env.POSTGRES_PASSWORD = 'postgres';
+
+    // these are set by a .env file
+    // process.env.APP_JWT_SECRET = ""; // 32 random characters
+    // process.env.SPRING_MAIL_USERNAME = ""; // from address
+    // process.env.SPRING_MAIL_PASSWORD = ""; // Gmail app password
+
+    // Start the backend and frontend in parallel.
+    const [backendPid, frontendPid] = await Promise.all([
+        startProcess('./mvnw', ['spring-boot:run'], {
+            cwd: path.resolve(__dirname, '../backend'),
+            env: {...process.env},
+        }, 'backend'),
+        startProcess('npm', ['run', 'dev'], {
+            cwd: path.resolve(__dirname, '../frontend'),
+            env: {...process.env},
+        }, 'frontend'),
+    ]);
+
+    // Wait for both services to be ready.
+    await Promise.all([
+        waitForHttp(`http://localhost:${BACKEND_PORT}/actuator/health`, backendPid),
+        waitForHttp(`http://localhost:${FRONTEND_PORT}`, frontendPid),
+    ]);
+
+    // Persist PIDs so teardown can shut the services down.
+    fs.writeFileSync(STATE_FILE, JSON.stringify({backendPid, frontendPid}));
 }
