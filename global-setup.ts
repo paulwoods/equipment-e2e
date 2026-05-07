@@ -144,10 +144,33 @@ export default async function globalSetup() {
     // process.env.SPRING_MAIL_USERNAME = ""; // from address
     // process.env.SPRING_MAIL_PASSWORD = ""; // Gmail app password
 
+    // In CI we build a JAR once and run `java -jar` instead of `mvnw spring-boot:run`.
+    // The JVM cold-starts faster, Maven dep resolution doesn't repeat per run, and
+    // there's no devtools restart loop. Locally we keep mvnw so hot-reload works.
+    const ciMode = !!process.env.CI || process.env.E2E_CI_MODE === 'true';
+    const backendDir = path.resolve(__dirname, '../backend');
+
+    let backendCommand: string;
+    let backendArgs: string[];
+    if (ciMode) {
+        await run('./mvnw', ['-q', '-DskipTests', 'package'], {cwd: backendDir});
+        const targetDir = path.join(backendDir, 'target');
+        const jar = fs.readdirSync(targetDir)
+            .find((name) => name.startsWith('backend-') && name.endsWith('.jar') && !name.endsWith('.original'));
+        if (!jar) {
+            throw new Error(`No backend JAR found in ${targetDir} after package`);
+        }
+        backendCommand = 'java';
+        backendArgs = ['-jar', path.join(targetDir, jar)];
+    } else {
+        backendCommand = './mvnw';
+        backendArgs = ['spring-boot:run'];
+    }
+
     // Start the backend and frontend in parallel.
     const [backendPid, frontendPid] = await Promise.all([
-        startProcess('./mvnw', ['spring-boot:run'], {
-            cwd: path.resolve(__dirname, '../backend'),
+        startProcess(backendCommand, backendArgs, {
+            cwd: backendDir,
             env: {...process.env},
         }, 'backend'),
         startProcess('npm', ['run', 'dev'], {
@@ -156,10 +179,12 @@ export default async function globalSetup() {
         }, 'frontend'),
     ]);
 
-    // Wait for both services to be ready.
+    // Wait for both services to be ready. Cold-start Spring Boot can exceed the
+    // default 10s when Maven still has deps to resolve, so give the backend up
+    // to 60s; the frontend (Vite) is fast and 30s is plenty.
     await Promise.all([
-        waitForHttp(`http://localhost:${BACKEND_PORT}/actuator/health`, backendPid),
-        waitForHttp(`http://localhost:${FRONTEND_PORT}`, frontendPid),
+        waitForHttp(`http://localhost:${BACKEND_PORT}/actuator/health`, backendPid, 60),
+        waitForHttp(`http://localhost:${FRONTEND_PORT}`, frontendPid, 30),
     ]);
 
     // Persist PIDs so teardown can shut the services down.
