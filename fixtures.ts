@@ -26,4 +26,4 @@ export {expect};
  * Pair with strategy B: each test creates its own data instead of resetting the DB.
  */
 export const uniqueEmail = (prefix = 'user'): string =>
-    `${prefix}+${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
