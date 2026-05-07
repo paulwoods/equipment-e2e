@@ -134,6 +134,11 @@ export default async function globalSetup() {
     process.env.POSTGRES_USER = 'postgres';
     process.env.POSTGRES_PASSWORD = 'postgres';
 
+    // Raise the API rate limit ceiling so 8 parallel CRUD-heavy specs don't trip
+    // the production-default 100 req/min cap. The same code path is still
+    // exercised — the cap just isn't reached.
+    process.env.APP_API_RATE_LIMIT_MAX_REQUESTS = '10000';
+
     // these are set by a .env file
     // process.env.APP_JWT_SECRET = ""; // 32 random characters
     // process.env.SPRING_MAIL_USERNAME = ""; // from address
