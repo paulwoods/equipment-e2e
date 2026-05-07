@@ -5,6 +5,7 @@ import * as path from 'path';
 
 const CONTAINER_NAME = 'equipment-e2e-postgres';
 const STATE_FILE = path.join(os.tmpdir(), 'equipment-e2e-state.json');
+const STORAGE_STATE_FILE = path.resolve(__dirname, 'auth.json');
 
 function run(command: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -55,6 +56,13 @@ export default async function globalTeardown() {
         fs.unlinkSync(STATE_FILE);
     } catch {
         // State file missing or invalid; processes may have already exited.
+    }
+
+    // Remove the saved auth storageState so a stale file can't bleed into a future run.
+    try {
+        fs.unlinkSync(STORAGE_STATE_FILE);
+    } catch {
+        // Already gone.
     }
 
     // Remove the Postgres container.

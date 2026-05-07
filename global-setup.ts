@@ -3,12 +3,17 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
+import {request as playwrightRequest} from '@playwright/test';
 import 'dotenv/config';
 
 const CONTAINER_NAME = 'equipment-e2e-postgres';
 const BACKEND_PORT = 8080;
 const FRONTEND_PORT = 5173;
 const STATE_FILE = path.join(os.tmpdir(), 'equipment-e2e-state.json');
+
+export const ADMIN_EMAIL = 'admin@example.com';
+export const ADMIN_PASSWORD = 'password';
+export const STORAGE_STATE_FILE = path.resolve(__dirname, 'auth.json');
 
 function run(command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -154,4 +159,29 @@ export default async function globalSetup() {
 
     // Persist PIDs so teardown can shut the services down.
     fs.writeFileSync(STATE_FILE, JSON.stringify({backendPid, frontendPid}));
+
+    // Seed the admin user via the setup API and save an authenticated storageState
+    // so tests can opt into a logged-in browser context without paying the login cost.
+    const apiContext = await playwrightRequest.newContext({
+        baseURL: `http://localhost:${BACKEND_PORT}`,
+    });
+
+    const setupResp = await apiContext.post('/api/v1/setup', {
+        data: {email: ADMIN_EMAIL, password: ADMIN_PASSWORD},
+        headers: {'Content-Type': 'application/json'},
+    });
+    if (!setupResp.ok()) {
+        throw new Error(`Admin seed failed: ${setupResp.status()} ${await setupResp.text()}`);
+    }
+
+    // The setup endpoint sets access_token + refresh_token cookies on the response.
+    // Save the cookie jar against the frontend origin so the SPA reads them on first paint.
+    const state = await apiContext.storageState();
+    state.cookies = state.cookies.map((c) => ({
+        ...c,
+        domain: 'localhost',
+        path: '/',
+    }));
+    fs.writeFileSync(STORAGE_STATE_FILE, JSON.stringify(state, null, 2));
+    await apiContext.dispose();
 }
