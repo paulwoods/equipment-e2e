@@ -7,8 +7,8 @@ import {request as playwrightRequest} from '@playwright/test';
 import 'dotenv/config';
 
 const CONTAINER_NAME = 'equipment-e2e-postgres';
-const BACKEND_PORT = 8080;
-const FRONTEND_PORT = 5173;
+const BACKEND_PORT = 8081;
+const FRONTEND_PORT = 5174;
 const STATE_FILE = path.join(os.tmpdir(), 'equipment-e2e-state.json');
 
 export const ADMIN_EMAIL = 'admin@example.com';
@@ -139,6 +139,19 @@ export default async function globalSetup() {
     // exercised — the cap just isn't reached.
     process.env.APP_API_RATE_LIMIT_MAX_REQUESTS = '10000';
 
+    // The e2e frontend runs on 5174 (see FRONTEND_PORT) to avoid colliding with a
+    // developer's normal `npm run dev` on 5173. Backend CORS and password-reset
+    // links default to 5173, so override both for the e2e run.
+    process.env.APP_FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
+    process.env.APP_CORS_ALLOWED_ORIGINS = `http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}`;
+
+    // The e2e backend runs on 8081 (see BACKEND_PORT) to avoid colliding with a
+    // developer's normal Spring Boot run on 8080. SERVER_PORT tells Spring which
+    // port to bind, and VITE_BACKEND_URL points the Vite dev proxy at it.
+    process.env.SERVER_PORT = String(BACKEND_PORT);
+    process.env.APP_URL = `http://localhost:${BACKEND_PORT}`;
+    process.env.VITE_BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
+
     // these are set by a .env file
     // process.env.APP_JWT_SECRET = ""; // 32 random characters
     // process.env.SPRING_MAIL_USERNAME = ""; // from address
@@ -148,7 +161,7 @@ export default async function globalSetup() {
     // The JVM cold-starts faster, Maven dep resolution doesn't repeat per run, and
     // there's no devtools restart loop. Locally we keep mvnw so hot-reload works.
     const ciMode = !!process.env.CI || process.env.E2E_CI_MODE === 'true';
-    const backendDir = path.resolve(__dirname, '../backend');
+    const backendDir = path.resolve(__dirname, '../equipment-backend');
 
     let backendCommand: string;
     let backendArgs: string[];
@@ -173,8 +186,8 @@ export default async function globalSetup() {
             cwd: backendDir,
             env: {...process.env},
         }, 'backend'),
-        startProcess('npm', ['run', 'dev'], {
-            cwd: path.resolve(__dirname, '../frontend'),
+        startProcess('npm', ['run', 'dev', '--', '--port', String(FRONTEND_PORT), '--strictPort'], {
+            cwd: path.resolve(__dirname, '../equipment-frontend'),
             env: {...process.env},
         }, 'frontend'),
     ]);
