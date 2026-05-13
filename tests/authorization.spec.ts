@@ -40,7 +40,7 @@ test.describe('authorization for USER role', () => {
         await userContext.close();
     });
 
-    test('USER role on /users sees the table but not the admin-only actions', async ({authedPage, browser}) => {
+    test('USER role cannot access /users and is redirected to the dashboard', async ({authedPage, browser}) => {
         const {email, password} = await seedUserRoleUser(authedPage);
 
         const userContext = await browser.newContext();
@@ -55,16 +55,8 @@ test.describe('authorization for USER role', () => {
         ]);
 
         await userPage.goto('/users');
-        await expect(userPage.getByTestId('page-header')).toHaveText(/Users/);
-
-        // The admin-only "New User" button must not be rendered.
-        await expect(userPage.getByRole('link', {name: 'New User'})).toHaveCount(0);
-
-        // The user's own row should be visible, but it must NOT have Edit or Delete controls.
-        const ownRow = userPage.getByTestId('users-table').getByRole('row', {name: email});
-        await expect(ownRow).toBeVisible();
-        await expect(ownRow.getByRole('link', {name: 'Edit', exact: true})).toHaveCount(0);
-        await expect(ownRow.getByRole('button', {name: 'Delete'})).toHaveCount(0);
+        await userPage.waitForURL(/\/dashboard$/);
+        await expect(userPage.getByTestId('page-header')).toHaveText(/Dashboard/);
 
         await userContext.close();
     });

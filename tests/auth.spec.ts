@@ -39,7 +39,13 @@ test.describe('logout', () => {
         await expect(authedPage.getByTestId('page-header')).toHaveText(/Dashboard/);
 
         await authedPage.getByTestId('user-menu').click();
-        await authedPage.getByTestId('logout').click();
+        // The logout handler fires window.location.href='/' once the POST resolves; wait for
+        // both before navigating, otherwise that redirect races our goto('/dashboard').
+        await Promise.all([
+            authedPage.waitForResponse((r) => r.url().includes('/api/v1/auth/logout') && r.ok()),
+            authedPage.waitForURL(/\/$/),
+            authedPage.getByTestId('logout').click(),
+        ]);
 
         // After logout, hitting a protected route should redirect to /login.
         await authedPage.goto('/dashboard');
