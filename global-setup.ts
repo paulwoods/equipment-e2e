@@ -140,16 +140,15 @@ export default async function globalSetup() {
     process.env.APP_API_RATE_LIMIT_MAX_REQUESTS = '10000';
 
     // The e2e frontend runs on 5174 (see FRONTEND_PORT) to avoid colliding with a
-    // developer's normal `npm run dev` on 5173. Backend CORS and password-reset
-    // links default to 5173, so override both for the e2e run.
-    process.env.APP_FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
+    // developer's normal `npm run dev` on 5173. Backend CORS and the emailed
+    // user-facing links default to 5173, so override both for the e2e run.
+    process.env.APP_URL = `http://localhost:${FRONTEND_PORT}`;
     process.env.APP_CORS_ALLOWED_ORIGINS = `http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}`;
 
     // The e2e backend runs on 8081 (see BACKEND_PORT) to avoid colliding with a
     // developer's normal Spring Boot run on 8080. SERVER_PORT tells Spring which
     // port to bind, and VITE_BACKEND_URL points the Vite dev proxy at it.
     process.env.SERVER_PORT = String(BACKEND_PORT);
-    process.env.APP_URL = `http://localhost:${BACKEND_PORT}`;
     process.env.VITE_BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 
     // these are set by a .env file
