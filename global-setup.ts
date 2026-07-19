@@ -148,6 +148,10 @@ export default async function globalSetup() {
     // The e2e backend runs on 8081 (see BACKEND_PORT) to avoid colliding with a
     // developer's normal Spring Boot run on 8080. SERVER_PORT tells Spring which
     // port to bind, and VITE_BACKEND_URL points the Vite dev proxy at it.
+    // Startup fails without a dashboard-email recipient; nothing in the e2e run
+    // sends to it, but the backend has to boot.
+    process.env.APP_EMAIL_RECIPIENT = 'e2e-recipient@example.com';
+
     process.env.SERVER_PORT = String(BACKEND_PORT);
     process.env.VITE_BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 
