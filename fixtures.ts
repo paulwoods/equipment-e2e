@@ -11,6 +11,17 @@ type Fixtures = {
 };
 
 export const test = base.extend<Fixtures>({
+    /**
+     * A browser context authenticated as the SHARED admin seeded in global-setup.
+     *
+     * Every spec runs as this one identity, in parallel. Anything that invalidates
+     * the user's sessions server-side — logging out, changing the password, a
+     * password reset — bumps `tokenVersion` and kills this session for every other
+     * worker mid-run, which surfaces as unrelated specs redirecting to /login.
+     *
+     * If a test needs to perform one of those actions, have it create its own user
+     * and act as that identity instead (see the logout test in auth.spec.ts).
+     */
     authedPage: async ({browser}, use) => {
         const context = await browser.newContext({storageState: STORAGE_STATE_FILE});
         const page = await context.newPage();

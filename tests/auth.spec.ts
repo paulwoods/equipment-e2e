@@ -1,4 +1,4 @@
-import {test, expect, ADMIN_EMAIL, ADMIN_PASSWORD} from '../fixtures';
+import {test, expect, ADMIN_EMAIL, ADMIN_PASSWORD, uniqueEmail} from '../fixtures';
 
 test.describe('login', () => {
     test('signs in with valid credentials and can reach the protected dashboard', async ({page}) => {
@@ -34,22 +34,52 @@ test.describe('login', () => {
 });
 
 test.describe('logout', () => {
-    test('signs out from the sidebar user menu and clears the session', async ({authedPage}) => {
-        await authedPage.goto('/dashboard');
-        await expect(authedPage.getByTestId('page-header')).toHaveText(/Dashboard/);
+    test('signs out from the sidebar user menu and clears the session', async ({authedPage, browser}) => {
+        // Logging out bumps the user's tokenVersion server-side, which invalidates
+        // EVERY JWT for that user — not just this browser's. Signing out as the
+        // shared admin would therefore kill the auth.json session that every other
+        // spec runs on, and with fullyParallel workers that lands mid-test. So sign
+        // out as a throwaway user; admin is only borrowed here to create it.
+        const email = uniqueEmail('logout');
+        const password = 'a-strong-password';
 
-        await authedPage.getByTestId('user-menu').click();
+        await authedPage.goto('/users/new');
+        await authedPage.getByTestId('user-name').fill('Logout Target');
+        await authedPage.getByTestId('user-email').fill(email);
+        await authedPage.getByTestId('user-password').fill(password);
+        await Promise.all([
+            authedPage.waitForURL(/\/users$/),
+            authedPage.getByRole('button', {name: /create user/i}).click(),
+        ]);
+
+        const context = await browser.newContext();
+        const page = await context.newPage();
+
+        await page.goto('/login');
+        await page.getByTestId('email').fill(email);
+        await page.getByTestId('password').fill(password);
+        await Promise.all([
+            page.waitForResponse((r) => r.url().includes('/api/v1/auth/login') && r.ok()),
+            page.getByRole('button', {name: /sign in/i}).click(),
+        ]);
+
+        await page.goto('/dashboard');
+        await expect(page.getByTestId('page-header')).toHaveText(/Dashboard/);
+
+        await page.getByTestId('user-menu').click();
         // The logout handler fires window.location.href='/' once the POST resolves; wait for
         // both before navigating, otherwise that redirect races our goto('/dashboard').
         await Promise.all([
-            authedPage.waitForResponse((r) => r.url().includes('/api/v1/auth/logout') && r.ok()),
-            authedPage.waitForURL(/\/$/),
-            authedPage.getByTestId('logout').click(),
+            page.waitForResponse((r) => r.url().includes('/api/v1/auth/logout') && r.ok()),
+            page.waitForURL(/\/$/),
+            page.getByTestId('logout').click(),
         ]);
 
         // After logout, hitting a protected route should redirect to /login.
-        await authedPage.goto('/dashboard');
-        await expect(authedPage).toHaveURL(/\/login/);
+        await page.goto('/dashboard');
+        await expect(page).toHaveURL(/\/login/);
+
+        await context.close();
     });
 });
 
