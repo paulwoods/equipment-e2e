@@ -100,23 +100,34 @@ export default async function globalSetup() {
         // Container likely didn't exist; safe to ignore.
     }
 
-    // Start the Postgres container.
+    // Start the Postgres container. The same init script used in dev/prod
+    // creates a non-superuser `equipment` role owning an `equipment` database,
+    // so e2e exercises the exact permissions the app has in production.
+    const initScript = path.resolve(__dirname, '../deployment/init-app-db.sh');
     await run('docker', [
         'run',
         '-d',
         '--name', CONTAINER_NAME,
         '-e', 'POSTGRES_PASSWORD=postgres',
         '-e', 'POSTGRES_USER=postgres',
-        '-e', 'POSTGRES_DB=test',
+        '-e', 'POSTGRES_DB=postgres',
+        '-e', 'SPRING_DATASOURCE_USERNAME=equipment',
+        '-e', 'SPRING_DATASOURCE_PASSWORD=equipment',
+        '-v', `${initScript}:/docker-entrypoint-initdb.d/init-app-db.sh:ro`,
         '-p', '15432:5432',
         'postgres:18',
     ]);
 
-    // Wait for Postgres to accept connections.
+    // Wait for Postgres to be ready. Connecting over TCP as the equipment role
+    // proves both that the final server is up (the temporary init-phase server
+    // only listens on the unix socket) and that the init script has run.
     let ready = false;
     for (let i = 0; i < 30; i++) {
         try {
-            await run('docker', ['exec', CONTAINER_NAME, 'pg_isready', '-U', 'postgres']);
+            await run('docker', [
+                'exec', '-e', 'PGPASSWORD=equipment', CONTAINER_NAME,
+                'psql', '-h', '127.0.0.1', '-U', 'equipment', '-d', 'equipment', '-c', 'SELECT 1',
+            ]);
             ready = true;
             break;
         } catch {
@@ -129,10 +140,10 @@ export default async function globalSetup() {
     }
 
     // Set environment variables for backend and tests.
-    process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:15432/test';
-    process.env.POSTGRES_DB = 'jdbc:postgresql://localhost:15432/test';
-    process.env.POSTGRES_USER = 'postgres';
-    process.env.POSTGRES_PASSWORD = 'postgres';
+    process.env.DATABASE_URL = 'postgresql://equipment:equipment@localhost:15432/equipment';
+    process.env.SPRING_DATASOURCE_URL = 'jdbc:postgresql://localhost:15432/equipment';
+    process.env.SPRING_DATASOURCE_USERNAME = 'equipment';
+    process.env.SPRING_DATASOURCE_PASSWORD = 'equipment';
 
     // Raise the API rate limit ceiling so 8 parallel CRUD-heavy specs don't trip
     // the production-default 100 req/min cap. The same code path is still
