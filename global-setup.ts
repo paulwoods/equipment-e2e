@@ -13,6 +13,7 @@ const STATE_FILE = path.join(os.tmpdir(), 'equipment-e2e-state.json');
 
 export const ADMIN_EMAIL = 'admin@example.com';
 export const ADMIN_PASSWORD = 'password';
+export const SETUP_TOKEN = 'e2e-setup-token';
 export const STORAGE_STATE_FILE = path.resolve(__dirname, 'auth.json');
 
 function run(command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }): Promise<string> {
@@ -163,6 +164,10 @@ export default async function globalSetup() {
     // sends to it, but the backend has to boot.
     process.env.APP_EMAIL_RECIPIENT = 'e2e-recipient@example.com';
 
+    // First-run setup refuses to run without an operator token, so the admin seed
+    // below has to present one. Any value works as long as both sides agree.
+    process.env.APP_SETUP_TOKEN = SETUP_TOKEN;
+
     process.env.SERVER_PORT = String(BACKEND_PORT);
     process.env.VITE_BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
 
@@ -224,7 +229,7 @@ export default async function globalSetup() {
     });
 
     const setupResp = await apiContext.post('/api/v1/setup', {
-        data: {email: ADMIN_EMAIL, password: ADMIN_PASSWORD},
+        data: {email: ADMIN_EMAIL, password: ADMIN_PASSWORD, setupToken: SETUP_TOKEN},
         headers: {'Content-Type': 'application/json'},
     });
     if (!setupResp.ok()) {
